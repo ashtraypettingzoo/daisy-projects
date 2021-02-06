@@ -15,41 +15,52 @@ float ykm2[4] = { 0.f }; // y[k - 2]
 static void AudioCallback(float ** in, float ** out, size_t size)
 {
 	// get control values
+	// ctrl 0 = dry/wet
+	// ctrl 1 = z radius
+	// ctrl 2 = z theta
 	float ctrlVal[4]; // 0.f - 1.f
 	for (int i = 0; i < 4; i++)
 		ctrlVal[i] = patch.controls[i].Process();
 	
 	// compute coefficients & process audio
-	// reference: https://en.wikipedia.org/wiki/All-pass_filter#Digital_implementation
-	float ztheta  = ctrlVal[0] * 2.f * M_PI,
-	      zradius = ctrlVal[1],
-		  zreal   = zradius * std::cos(ztheta);
+	float ztheta = ctrlVal[2] * 2.f * M_PI,
+	      zrad   = ctrlVal[1],
+		  zrad2  = zrad * zrad,
+		  zreal  = zrad * std::cos(ztheta);
 	
     for (size_t i = 0; i < size; i += 2)
     {
         for (size_t chn = 0; chn < 4; chn++)
         {
-			float xk = in[chn][i];
-			float yk = xk; // send input directly into output
-			// TODO: implement allpass algorithm
-            out[chn][i] = yk;
+			float yk, xk = in[chn][i];
+			
+			// reference: https://en.wikipedia.org/wiki/All-pass_filter#Digital_implementation
+			// y[k] = 2*R(z)*(y[k-1]-x[k-1]) + (|z|^2)*(x[k]-y[k-2]) + x[k-2]
+			yk = 2.f * zreal * (ykm1[chn] - xkm1[chn]) + zrad2 * (xk - ykm2[chn]) + xkm2[chn];
+			
+			// mix dry & wet signal
+            out[chn][i] = ctrlVal[0] * yk + (1.f - ctrlVal[0]) * xkm2[chn];
+			
+			// set feedforward & feedback values
+			ykm2[chn] = ykm1[chn];
+			ykm1[chn] = yk;
+			xkm2[chn] = xkm1[chn];
+			xkm1[chn] = xk;
         }
     }
 }
 
 int main(void)
 {
-    patch.Init();
-	
-    patch.display.WriteString(const_cast<char*>("BASIC-ALLPASS"), Font_7x10, true);
-    patch.display.Update();
-    patch.DelayMs(2000);
+	patch.Init();
 
-    patch.StartAdc();
-    patch.StartAudio(AudioCallback);
-	
-    while(1) 
-    {
-        patch.DisplayControls(false);
-    }
+	patch.display.WriteString(const_cast<char*>("BASIC-ALLPASS"), Font_7x10, true);
+	patch.display.Update();
+	patch.DelayMs(2000);
+
+	patch.StartAdc();
+	patch.StartAudio(AudioCallback);
+
+	while (true)
+		patch.DisplayControls(false);
 }
